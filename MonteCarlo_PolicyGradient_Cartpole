@@ -1,0 +1,60 @@
+import torch 
+import numpy as np
+import matplotlib.pyplot as plt
+from random import randint
+import gym
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+
+class Net(nn.Module):
+    def __init__(self):
+        super(Net, self).__init__()
+        self.l1 = torch.nn.Linear(4, 64)
+        self.l4 = torch.nn.Linear(64, 2)
+    def forward(self, x):
+        x = F.relu(self.l1(x))
+        x = F.softmax(self.l4(x))
+        return x
+
+pi = Net()
+
+#Sets up variables
+learning_rate = 0.01
+episodes = 1000
+episode_len = 100
+optimizer = optim.Adam(pi.parameters(), lr=learning_rate)
+discount = 0.99
+
+env = gym.make('CartPole-v1') #2 Actions, 4 States
+for k in range(episodes):
+    traj = list()
+    env.reset()
+    for i in range(episode_len):
+        if i > 0:
+            action_distribution = pi(torch.from_numpy(state).float()) * 100
+            n = randint(0,100)
+            if n < action_distribution[0]:
+                action = 0
+            else:
+                action = 1
+        else:
+            action = randint(0,1)
+        env.render()
+        state, action,done, info = env.step(action)
+    
+        if done:
+            reward = -1
+        else:
+            reward = 1
+        traj.append([state, action, reward])
+    env.close()
+    Weighted_Rew = 0
+    print(k)
+    for i in reversed(range(len(traj))):
+        Weighted_Rew = discount * Weighted_Rew + traj[i][2]
+        update = torch.log(pi(torch.from_numpy(traj[i][0]).float()))[int(traj[i][1])]
+        update = update * Weighted_Rew
+        optimizer.zero_grad()
+        update.backward(retain_graph=False)
+        optimizer.step()
