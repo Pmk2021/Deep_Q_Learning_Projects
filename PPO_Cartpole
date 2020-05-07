@@ -1,0 +1,158 @@
+import torch 
+import numpy as np
+import matplotlib.pyplot as plt
+from random import randint
+import gym
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from copy import deepcopy
+
+class data():
+    def __init__(self):
+        self.pastactions = list()
+        self.reward = list()
+        self.states = list()
+        self.pastactions_train = list()
+        self.qvalues = list()
+    def newaction(self, action, reward, state):
+        self.states.append(state)
+        self.pastactions.append(int(action))
+        self.reward.append(reward)
+    def trainrandomdata(self):
+        i = randint(0,len(self.states)-1)
+        if i == len(self.states)-1:
+            Q = Q_Net(torch.from_numpy(np.array(self.states[i])).float())
+            action = self.pastactions[i]
+            return (Q[action] - self.reward[i])**2
+        Q = Q_Net(torch.from_numpy(np.array(self.states[i])).float())
+        #Q_Target = Target_Net(torch.from_numpy(np.array(self.states[i])).float())
+        action = self.pastactions[i]
+        MaxQIndex = list(Q_Net(torch.from_numpy(np.array(self.states[i + 1])).float()).float().detach())
+        MaxQIndex = MaxQIndex.index(max(MaxQIndex))
+        Q_Target = 0.85 * Target_Net(torch.from_numpy(np.array(self.states[i+1])).float())[MaxQIndex] + self.reward[i]
+        return ((Q[action]-Q_Target))**2
+
+class Net(nn.Module):
+    def __init__(self):
+        super(Net, self).__init__()
+        self.l1 = torch.nn.Linear(4, 64)
+        self.l4 = torch.nn.Linear(64, 2)
+    def forward(self, x):
+        x = torch.tanh(self.l1(x))
+        x = F.softmax(self.l4(x))
+        return x
+
+class Net1(nn.Module):
+    def __init__(self):
+        super(Net1, self).__init__()
+        self.l1 = torch.nn.Linear(4, 64)
+        self.l2 = torch.nn.Linear(64, 2)
+    def forward(self, x):
+        x = F.relu(self.l1(x))
+        x = self.l2(x)
+        return x
+ 
+def getrandomloss(t):
+    return data_list[randint(0,len(data_list)-1)].trainrandomdata()
+    
+    
+Q_Net = Net1()
+Target_Net = Net1()
+
+pi = Net()
+#pi.load_state_dict(torch.load(r'C:\Users\pmuralikrishnan\Desktop\Python\New folder\New folder\MountainCar_Q_Policy'))
+#Sets up variables
+learning_rate = .0003
+episodes = 20
+episode_len = 10000
+optimizer = optim.Adam(pi.parameters(), lr=learning_rate)
+optimizer2 = optim.Adam(Q_Net.parameters(), lr=0.001)
+discount = 0.8
+epsilon = 1
+episode_num = 0
+
+time_lasted = list()
+episode = list()
+data_list = list()
+
+env = gym.make('CartPole-v1') #2 Actions, 4 States
+for epoch in range(2000):
+    update = 0
+    for k in range(episodes):
+        episode_num += 1
+        traj = list()
+        s0 = env.reset()
+        episode.append(episode_num)
+        data_list.append(data())
+        for i in range(episode_len):
+            if i > 0:
+                action_distribution = pi(torch.from_numpy(state).float()) * 100
+                n = randint(0,100)
+                if n < action_distribution[0]:
+                    action = 0
+                else:
+                    action = 1
+                if not (action_distribution[0] > 0):
+                    print(action_distribution)
+            else:
+                action = randint(0,1)
+                
+            s0 = state
+            
+            if k == episodes - 1:
+                env.render()
+            state, r_ ,done, info = env.step(action)
+        
+            if done:
+                reward = 0
+                traj.append([s0, action, reward])
+                time_lasted.append(i)
+                break
+            else:
+                reward = 1
+            data_list[-1].newaction(action, reward, s0)
+            traj.append([s0, action, reward])
+            s0 = state
+            q_loss = 0
+            if i > 1 and i % 2 == 0:
+                for q in range(16):
+                    q_loss += getrandomloss(1)
+                optimizer2.zero_grad()
+                q_loss.backward(retain_graph=True)
+                optimizer2.step()
+        env.close()
+        Weighted_Rew = 0
+        epsilon = epsilon * 0.99
+        if k%20 == 0:
+            Target_Net = deepcopy(Q_Net)
+        if epoch > 1:
+            for i in reversed(range(1, len(traj))):
+                pi_old = deepcopy(pi)
+                Weighted_Rew = 1 * Weighted_Rew + traj[i][2] 
+                q_vals = Q_Net(torch.from_numpy(traj[i][0]).float())
+                for ab in range(10):
+                    #print(ab)
+                    old_policy = pi_old(torch.from_numpy(traj[i][0]).float())[int(traj[i][1])]
+                    new_policy = pi(torch.from_numpy(traj[i][0]).float())[int(traj[i][1])]
+                    advantage = q_vals[int(traj[i][1])] - torch.mean(q_vals)
+                    update =  new_policy/old_policy * advantage * 1/episodes * -1
+                    if new_policy/old_policy > 1.05 or new_policy/old_policy < 0.95:
+                        break
+                    optimizer.zero_grad()
+                    update.backward(retain_graph=True)
+                    if advantage >= 0:
+                        clip = (1 + 0.00) * advantage
+                    else:
+                        clip = (1 - 0.00) * advantage
+                    #update = (update - (clip))**2
+                    #torch.nn.utils.clip_grad_norm_(pi.parameters(), clip)
+                    optimizer.step()
+            
+        if len(episode) > len(time_lasted):
+            time_lasted.append(episode_len)
+    
+    av_len = sum(time_lasted[-episodes:])/episodes
+    print('epoch: ' + str(epoch) + '; Average len: ' + str(av_len))
+    
+torch.save(pi.state_dict(), r'C:\Users\pmuralikrishnan\Desktop\Python\New folder\New folder\MountainCar_Q_Policy')
